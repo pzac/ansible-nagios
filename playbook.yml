@@ -4,9 +4,17 @@
     nagios_download_dir: /tmp
     nagios_src: "{{ nagios_download_dir }}/nagios-4.4.6"
     nagios_src_url: https://assets.nagios.com/downloads/nagioscore/releases/nagios-4.4.6.tar.gz
+    nagios_plugins_src: "{{ nagios_download_dir }}/nagios-plugins-2.3.3"
+    nagios_plugins_src_url: https://nagios-plugins.org/download/nagios-plugins-2.3.3.tar.gz
+    nagios_user: nagios
+    nagios_group: nagios
     apache2_port: 8080
+    apache2_user: www-data
+    admin_user: nagiosadmin
+    admin_pass: test
   pre_tasks:
     - name: "Update apt cache"
+      become: true
       apt:
         update_cache: true
         cache_valid_time: 36000
@@ -19,6 +27,18 @@
       with_items:
         - unzip
         - apache2
+        - php7.3-gd
+        - libgd-dev
+        - libapache2-mod-php7.3
+        - python-pip
+        - python-setuptools
+        - python3-pip
+        - python3-setuptools
+
+    - name: Install python dependencies
+      become: true
+      pip:
+        name: passlib
 
     - name: Download and unpack Nagios
       unarchive:
@@ -47,5 +67,115 @@
             name: apache2
             state: restarted
             enabled: true
+
+    - name: Enable CGI
+      become: true
+      apache2_module:
+        name: cgid
+        state: present
+      notify: restart apache
+
+    - name: Set up users and permissions
+      become: true
+      block:
+        - group:
+            name: "{{ nagios_group }}"
+            state: present
+        - user:
+            name: "{{ nagios_user }}"
+            state: present
+            groups: "{{ nagios_group }}"
+            shell: /bin/bash
+        - user:
+            name: "{{ apache2_user }}"
+            state: present
+            groups: "{{ nagios_group }}"
+
+    - name: Compile Nagios
+      shell: make all
+      args:
+        chdir: "{{ nagios_src }}"
+        creates: "{{ nagios_src }}/base/nagios"
+
+    - name: Install Nagios
+      become: true
+      block:
+        - shell: make install
+          args:
+            chdir: "{{ nagios_src }}"
+            creates: /usr/local/nagios/bin/nagios
+        - shell: make install-init
+          args:
+            chdir: "{{ nagios_src }}"
+            creates: /lib/systemd/system/nagios.service
+        - shell: make install-config
+          args:
+            chdir: "{{ nagios_src }}"
+            creates: /usr/local/nagios/etc/nagios.cfg
+        - shell: make install-commandmode
+          args:
+            chdir: "{{ nagios_src }}"
+            creates: /usr/local/nagios/var/rw
+        - shell: make install-webconf
+          args:
+            chdir: "{{ nagios_src }}"
+            creates: /etc/apache2/sites-enabled/nagios.conf
+          notify: restart apache
+
+    - name: Create admin user
+      become: true
+      htpasswd:
+        path: /usr/local/nagios/etc/htpasswd.users
+        name: "{{ admin_user }}"
+        password: "{{ admin_pass }}"
+        state: present
+        owner: root
+        group: www-data
+        mode: 0640
+      notify: restart apache
+
+    - name: Install Nagios plugins
+      block:
+        - name: Download plugins
+          unarchive:
+            src: "{{ nagios_plugins_src_url }}"
+            dest: "{{ nagios_download_dir }}"
+            creates: "{{ nagios_plugins_src }}"
+            remote_src: yes
+        - name: Run autoconf
+          shell: "./configure --with-nagios-user={{ nagios_user }} --with-nagios-group={{ nagios_group }}"
+          args:
+            chdir: "{{ nagios_plugins_src }}"
+            creates: "{{ nagios_plugins_src }}/Makefile"
+        - name: Compile plugins
+          shell: make
+          args:
+            chdir: "{{ nagios_plugins_src }}"
+            creates: "{{ nagios_plugins_src }}/plugins/check_ping"
+        - name: Install plugins
+          become: true
+          shell: make install
+          args:
+            chdir: "{{ nagios_plugins_src }}"
+            creates: /usr/local/nagios/libexec/check_ping
+
+    - name: Start and enable Nagios
+      become: true
+      service:
+        name: nagios
+        state: started
+        enabled: true
+
+  handlers:
+    - name: restart apache
+      become: true
+      service:
+        name: apache2
+        state: restarted
+    - name: restart nagios
+      become: true
+      service:
+        name: nagios
+        state: restarted
 
 
