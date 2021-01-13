@@ -1,4 +1,15 @@
 ---
 - hosts: all
   become: yes
+  vars:
+    nagios_download_dir: /tmp
+    nagios_src: "{{ nagios_download_dir }}/nagios-4.4.6"
+    nagios_src_url: https://assets.nagios.com/downloads/nagioscore/releases/nagios-4.4.6.tar.gz
   tasks:
+    - name: Download and unpack Nagios
+      unarchive:
+        src: "{{ nagios_src_url }}"
+        dest: "{{ nagios_download_dir }}"
+        creates: "{{ nagios_src }}"
+        remote_src: yes
+
