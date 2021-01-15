@@ -8,6 +8,9 @@
     nagios_plugins_src_url: https://nagios-plugins.org/download/nagios-plugins-2.3.3.tar.gz
     nagios_user: nagios
     nagios_group: nagios
+    nagios_items:
+      - adsl-router.cfg
+      - pi-dht22.cfg
     apache2_port: 8080
     apache2_user: www-data
     admin_user: nagiosadmin
@@ -159,12 +162,32 @@
             chdir: "{{ nagios_plugins_src }}"
             creates: /usr/local/nagios/libexec/check_ping
 
+    - name: Nagios configuration
+      become: true
+      block:
+        - name: Copy configuration
+          copy:
+            src: "{{ item }}"
+            dest: "/usr/local/nagios/etc/objects/{{ item }}"
+          with_items: "{{ nagios_items }}"
+          notify: restart nagios
+        - name: Enable configuration
+          lineinfile:
+            path: /usr/local/nagios/etc/nagios.cfg
+            line: "cfg_file=/usr/local/nagios/etc/objects/{{ item }}"
+            create: true
+          with_items: "{{ nagios_items }}"
+          notify: restart nagios
+
+
+
     - name: Start and enable Nagios
       become: true
       service:
         name: nagios
         state: started
         enabled: true
+
 
   handlers:
     - name: restart apache
